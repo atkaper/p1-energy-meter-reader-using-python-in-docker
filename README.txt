@@ -1,6 +1,8 @@
 Energy Meter Poller / Storage
 ==============================================================================================================
 
+See also blog post: https://www.kaper.com/software/p1-energy-meter-reader-using-python-in-docker/
+
 This read.py script can be used to read a (Dutch?) energy meter, using it's P1 port and a serial to usb cable.
 It is targeted at the DSMR version 5.0 meters, no clue if it works with older types as well. The data which
 is read will be inserted in a mysql database for further processing. Make sure you find a proper serial to usb
