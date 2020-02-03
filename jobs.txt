@@ -1,0 +1,5 @@
+#* * * * * root /job.sh > /proc/1/fd/1 2>/proc/1/fd/2
+
+# run meter reading every quarter of an hour
+1,16,31,46 * * * * root /job.sh > /proc/1/fd/1 2>/proc/1/fd/2
+
