@@ -21,18 +21,47 @@
 # interval you like. My meter can be polled as fast as once every second (not recommended, it would need
 # a changed script to just keep reading the data-stream, and not stop after each message).
 # 
-# Thijs Kaper, april 2018.
+# Thijs Kaper, April 2018.
+
+# Addition: also write the data to an influx-db, as that is better suitable to produce grafana graphs.
+# Set the proper influx-db connect URL and user:password here at the top of the file:
+# influx_host_port, influx_db, influx_user_password.
+# The influx_db contains the name of your database in the influxdb. You need to have created that
+# database inside influx, for example using command line interface, and entering "create database meter".
+# Also make sure in the influx configuration to enable the http interface.
+# When running in docker, use the hostname of influx with which you can read it. That's not localhost,
+# as that would point to the python meter script container. So use the external IP of the host serving
+# the influx, or make a docker network to bind both containers to. Too much to explain here ;-)
+#
+# In addition to adding influx, you now can enable/disable the influx and sql storage separately
+# by setting the values of store_in_influx and store_in_postgres
+#
+# Thijs Kaper, 30 October 2020.
 
 import serial
 import crcmod
 import re
 import MySQLdb
+import httplib
+import base64
+
+# enable/disable database backends, use values True or False
+store_in_influx = True
+store_in_postgres = True
+
+# influx data submit configuration
+influx_host_port = "192.168.0.120:8086"
+influx_db = "meter"
+influx_user_password = "admin:SomePassword18"
+# set influx_use_credentials to False if you did not set up a secured influx, but keep it open
+influx_use_credentials = True
 
 # open serial port
 ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=30, parity=serial.PARITY_NONE, rtscts=0)
 
 # connect to mysql database
-db = MySQLdb.connect("192.168.0.120","root","MyMeter18", "meter")
+if store_in_postgres:
+  db = MySQLdb.connect("192.168.0.120","root","MyMeter18", "meter")
 
 # list of known obis code's, translated to more readable field names
 # this is the set as found in a "P1 Companion Standard" version 5.0.2 document for DSMR 5.0
@@ -196,13 +225,63 @@ if not checksum_ok:
     print "CHECKSUM ERROR, expected " + calculated_checksum
     exit(1)
 
-print "CHECKSUM OK"
+print "CHECKSUM OK\n"
 
-# insert into database
-cursor = db.cursor()
 
-cursor.execute("""INSERT INTO `METER` (`TIMESTAMP`, `TOTAL_DELIVERY_LOW_KWH`, `TOTAL_DELIVERY_HIGH_KWH`, `TOTAL_BACKDELIVERY_LOW_KWH`, `TOTAL_BACKDELIVERY_HIGH_KWH`, `TARIFF_INDICATOR`, `ACTUAL_DELIVERY_KW`, `ACTUAL_BACKDELIVERY_KW`, `NR_POWERFAILURES`, `NR_POWERFAILURES_LONG`, `POWERFAILURE_LOG`, `NR_VOLTAGE_SAGS_L1`, `NR_VOLTAGE_SWELLS_L1`, `TEXT_MESSAGE`, `VOLTAGE_L1_V`, `CURRENT_L1_A`, `MBUS1_VALUE_GAS_M3`, `MBUS1_VALUE_TIMESTAMP`, `JSON`) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (values['TIMESTAMP'], values['TOTAL_DELIVERY_LOW_KWH'], values['TOTAL_DELIVERY_HIGH_KWH'], values['TOTAL_BACKDELIVERY_LOW_KWH'], values['TOTAL_BACKDELIVERY_HIGH_KWH'], values['TARIFF_INDICATOR'], values['ACTUAL_DELIVERY_KW'], values['ACTUAL_BACKDELIVERY_KW'], values['NR_POWERFAILURES'], values['NR_POWERFAILURES_LONG'], values['POWERFAILURE_LOG'], values['NR_VOLTAGE_SAGS_L1'], values['NR_VOLTAGE_SWELLS_L1'], values['TEXT_MESSAGE'], values['VOLTAGE_L1_V'], values['CURRENT_L1_A'], values['MBUS1_VALUE_GAS_M3'], values['MBUS1_VALUE_TIMESTAMP'], str(values)))
+# insert into influx database
+# to do this, create a message body with all fields as "KEYNAME value=VALUE", with one line per key, and the value
+# needs to be quoted for strings, and not quoted for numeric values.
+# An auto-detect function is made to do this. Minor catch (which I hope never happens), is if a value changes
+# between numeric and non-numeric for different measurements, the first one will win for the datatype.
+# Influx will not change data-type after initial create.
+# For my meter this will not happen as far as I can see.
+# If this happens for your meter, then you will need to change the script to configure fields which should be string
+# in some way, instead of using auto-detect. I added as examples all fields ending in _ID, and the HEADER field.
 
-db.commit()
-db.close()
+def quote_string(key, value):
+  if key.endswith("_ID"):
+    return "\"" + value.replace("\"", "'") + "\""
+
+  if key == "HEADER":
+    return "\"" + value.replace("\"", "'") + "\""
+
+  try:
+    # try parsing as number, if OK, return the value, if fail, return the quoted value
+    float(value)
+    return value
+  except:
+    return "\"" + value.replace("\"", "'") + "\""
+
+# loop trhoug all fields, and append to post body
+if store_in_influx:
+  body = ""
+  for key, value in values.items():
+    body = body + key + " value=" + quote_string(key, value) + "\n"
+
+  print("Influx post body:\n\n" + body)
+
+  # post the data
+  conn = httplib.HTTPConnection(influx_host_port)
+  if influx_use_credentials:
+    auth_header = { "Authorization": "Basic " + base64.b64encode(influx_user_password.encode('ascii')).decode('ascii') }
+    conn.request('POST', '/write?db=' + influx_db, body, auth_header)
+  else:
+    conn.request('POST', '/write?db=' + influx_db, body)
+
+  response = conn.getresponse()
+  print("influx postresponse " + str(response.status) + "\n")
+
+
+if store_in_postgres:
+  # insert into sql database
+  cursor = db.cursor()
+
+  insert_result = cursor.execute("""INSERT INTO `METER` (`TIMESTAMP`, `TOTAL_DELIVERY_LOW_KWH`, `TOTAL_DELIVERY_HIGH_KWH`, `TOTAL_BACKDELIVERY_LOW_KWH`, `TOTAL_BACKDELIVERY_HIGH_KWH`, `TARIFF_INDICATOR`, `ACTUAL_DELIVERY_KW`, `ACTUAL_BACKDELIVERY_KW`, `NR_POWERFAILURES`, `NR_POWERFAILURES_LONG`, `POWERFAILURE_LOG`, `NR_VOLTAGE_SAGS_L1`, `NR_VOLTAGE_SWELLS_L1`, `TEXT_MESSAGE`, `VOLTAGE_L1_V`, `CURRENT_L1_A`, `MBUS1_VALUE_GAS_M3`, `MBUS1_VALUE_TIMESTAMP`, `JSON`) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (values['TIMESTAMP'], values['TOTAL_DELIVERY_LOW_KWH'], values['TOTAL_DELIVERY_HIGH_KWH'], values['TOTAL_BACKDELIVERY_LOW_KWH'], values['TOTAL_BACKDELIVERY_HIGH_KWH'], values['TARIFF_INDICATOR'], values['ACTUAL_DELIVERY_KW'], values['ACTUAL_BACKDELIVERY_KW'], values['NR_POWERFAILURES'], values['NR_POWERFAILURES_LONG'], values['POWERFAILURE_LOG'], values['NR_VOLTAGE_SAGS_L1'], values['NR_VOLTAGE_SWELLS_L1'], values['TEXT_MESSAGE'], values['VOLTAGE_L1_V'], values['CURRENT_L1_A'], values['MBUS1_VALUE_GAS_M3'], values['MBUS1_VALUE_TIMESTAMP'], str(values)))
+
+  print("inserted " + str(insert_result) + " rows in db\n")
+
+  db.commit()
+  db.close()
+
+print ("\n---\n");
 

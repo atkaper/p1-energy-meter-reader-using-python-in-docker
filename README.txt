@@ -8,6 +8,11 @@ It is targeted at the DSMR version 5.0 meters, no clue if it works with older ty
 is read will be inserted in a mysql database for further processing. Make sure you find a proper serial to usb
 cable for your meter. Some need an additional resistor in it, and some use inverted levels.
 
+In addition to writing to MYSQL (or instead of), you can now also write your meter data to an influx-db.
+Choice can be made at the top of the read.py script, by setting up the proper variables.
+Installing an influx database is not described here. It is assumed you already have one, if you want to use this.
+In influx command line interface, create the database to be used. For example: "create database meter".
+
 To get this an easy portable installation, I have changed my setup to run in docker containers.
 
 The script runs using python 2.x, not meant for python 3. Will have to upgrade somewhere soon due to
@@ -46,10 +51,13 @@ Used ports:
        your docker server host ip): User: root, password: MyMeter18
 3306 - for mysql-server.sh, if you need to change it, find out how ;-) all parts use it from their default.
        should be handled in mysql-server.sh, mysql.sh, phpmyadmin.sh, read.py.
+8086 - the influx server port. User: admin, passwod: SomePassword18, ip: 192.168.0.120
 
 Note: I took the shortcut of exposing the database port on the docker host IP, and using that from all
 scripts. If you want, you could add a special docker network for it, and inside the containers access the
 database by name. I'll leave that as an exercise for yourself ;-)
+
+I have done the same port expose for influx, on my host IP, port 8086, and that's used from the script.
 
 Installing:
 --------------------------------------------------------------------------------------------------------------
@@ -60,7 +68,11 @@ vi phpmyadmin.sh read.py
 
 # Edit mysql-server.sh, mysql.sh, and read.py to change the password (optional).
 # Seach for: MyMeter18 and replace it by something else:
-vi mysql-server.sh mysql.sh read.py 
+vi mysql-server.sh mysql.sh read.py
+
+# Edit read.py to setup proper influx connection information, and enable/disable influx or postgres storage as you wish.
+# settings: store_in_influx, store_in_postgres, influx_host_port, influx_db, influx_user_password, influx_use_credentials
+vi read.py
 
 # build the image:
 ./build.sh
@@ -99,6 +111,8 @@ exit;
 Note: in scripts run-meter-read-once.sh and start.sh, there is the /dev/ttyUSB0 device, which will be used to
 talk to the P1 meter serial port. If you need to change that to something else, do that in these two scripts
 PLUS in the read.py script. Make sure to execute a ./build.sh after this change.
+
+Note: if you use influx, don't forget to create the database using the influxdb command line; "create database meter"
 
 
 Synology Serial Port Notes:
@@ -159,5 +173,11 @@ Note: yes, this graph is running quite slow. At least for my system with lots of
 To get this up-to-performance, we probably need to switch to use influx-db instead of mysql.
 I'll try that some other time. For now, my data is stored nicely.
 
-Thijs Kaper, february 2, 2020.
+Thijs Kaper, February 2, 2020.
+
+
+Changes: added influx write option.
+
+Thijs Kaper, October 30, 2020.
+
 
