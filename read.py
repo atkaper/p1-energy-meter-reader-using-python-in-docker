@@ -252,7 +252,7 @@ def quote_string(key, value):
   except:
     return "\"" + value.replace("\"", "'") + "\""
 
-# loop trhoug all fields, and append to post body
+# loop throug all fields, and append to post body
 if store_in_influx:
   body = ""
   for key, value in values.items():
