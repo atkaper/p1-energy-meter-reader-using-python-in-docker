@@ -31,7 +31,9 @@ The list of files / scripts:
 
 build.sh                 - use to build the docker container containing python, the read.py, and cron.
 create-table.sql         - use to create the meter table.
-create-view.sql          - use to create the meter view (it shows the diff between two measurements).
+create-view.sql          - use to create the meter view (it shows the diff between two measurements - multiply
+                           by 4 if using 15 minute interval to get to real WH values for fields
+                           DELIVERY_LOW/HIGH_WH and BACKDELIVERY_LOW/HIGH_WH!, same for GAS_DM3, also tims 4).
 Dockerfile               - the Docker build instruction file.
 drop-table.sql           - not to be used ;-)
 job.sh                   - executes the cron job (needed to setup an env var before run).
@@ -155,13 +157,13 @@ You can reach it on your servers' IP and port 3000, for example: http://192.168.
 
 In grafana, set up a datasource pointing to your mysql database.
 
-And create a dashboard with this query:
+And create a dashboard with this query (note, I just added 4* to the queries [Nov 1, 2020], as they were per 15 minutes, instead of per hour):
 
 SELECT
   TIMESTAMP AS "time",
-  GAS_DM3,
-  (DELIVERY_LOW_WH + DELIVERY_HIGH_WH) as DELIVERY_WH,
-  (BACKDELIVERY_LOW_WH + BACKDELIVERY_HIGH_WH) as BACKDELIVERY_WH
+  4*GAS_DM3 as GAS_DM3h,
+  4*(DELIVERY_LOW_WH + DELIVERY_HIGH_WH) as DELIVERY_WH,
+  4*(BACKDELIVERY_LOW_WH + BACKDELIVERY_HIGH_WH) as BACKDELIVERY_WH
 FROM METER_VIEW
 WHERE
   $__timeFilter(TIMESTAMP)
@@ -176,8 +178,88 @@ I'll try that some other time. For now, my data is stored nicely.
 Thijs Kaper, February 2, 2020.
 
 
+--------------------------------------------------------------------------------------------------------------
 Changes: added influx write option.
 
 Thijs Kaper, October 30, 2020.
+
+
+--------------------------------------------------------------------------------------------------------------
+Another addition (just in this readme):
+
+I wanted to use the new influxdb option to insert data every minute, instead of once per 15 minutes.
+But, for now, I also do want to keep inserting data in the sql table every 15 minutes also.
+So how can we do that? Relatively easy ;-)
+
+Alter the jobs.txt run pattern into this pattern, to run the script every minute:
+
+# run every minute
+* * * * * root /job.sh > /proc/1/fd/1 2>/proc/1/fd/2
+
+And alter read.py to have an extra line just below the import's at the top, add this line:
+
+from datetime import datetime as dt
+
+Just below that line, add the next line (I added an empty line before and after it):
+
+minute = dt.now().minute 
+
+And finally, change the "store_in_postgres = True" line into this:
+
+store_in_postgres = (minute == 1 or minute == 16 or minute == 31 or minute == 46)
+
+This will make store_in_postgres only have a "True" value 4 times per hour. While having "store_in_influx = True" for every run.
+
+That's all!
+
+Of course, you can also choose to run both influx and postgres every minute, in that case, just change the jobs.txt file.
+Warning: I did not realise before, but the postgres view shows the difference between two measurements, and if you run that
+every 15 minutes, the KWH values need to be multiplied by 4 to get to hourly rates! If you run per minute for postgres,
+multiply by 60 ;-) But it's perhaps better to switch to influx per minute, and use grafana functions to show the proper data.
+
+----
+
+A note on adding influx enery graphs to your grafana setup:
+
+Create a grafana datsource, pointing to your influxdb, using proper ip/port/credentials and database name.
+
+Add a graph for actual/current power use from the NET:
+
+SELECT mean("value") FROM "ACTUAL_DELIVERY_KW" WHERE $timeFilter GROUP BY time($__interval) fill(null)
+
+And one for back delivery to the NET:
+
+SELECT mean("value") FROM "ACTUAL_BACKDELIVERY_KW" WHERE $timeFilter GROUP BY time($__interval) fill(null)
+
+
+For graphing separate values, per tarrif, try the next (if you store measurements every 15 minutes, use this graph query):
+
+SELECT (4*derivative(first("value"), 15m)) FROM "TOTAL_DELIVERY_LOW_KWH" WHERE $timeFilter GROUP BY time($__interval) fill(null)
+
+And add 3 more of the same queries, using names: TOTAL_DELIVERY_HIGH_KWH, TOTAL_BACKDELIVERY_HIGH_KWH, TOTAL_BACKDELIVERY_LOW_KWH.
+Of course your situation can be different than mine, I have a dual measurement energy meter, and I have solar panels.
+You might want to remove (or just not add) the graphs which do not get any data ;-)
+
+In a second graph, I have added this query, to show the voltage:
+
+SELECT mean("value") FROM "VOLTAGE_L1_V" WHERE $timeFilter GROUP BY time($__interval) fill(null)
+
+Voltage does show quite a range, measuring between roughly 219 volts and 231 volts over the last 24 hours.
+
+In a second line, same graph, I added current, and made it use the right hand scale:
+
+SELECT mean("value") FROM "CURRENT_L1_A" WHERE $timeFilter GROUP BY time($__interval) fill(null)
+
+To choose righ hand scale, you can click on the line legend line color under the graph, which gives you a popup
+to choose color, and which axis to use. Don't forget to hit save after changing anything.
+
+
+To connect the dots in your graphs, make sure you set type to lines, and the null value handling to "connected" for the graphs which only show dots otherwise.
+
+Note: I just changed from measuring each 15 minutes to every minute. I wil later find out if I can alter the queries to get rid of the 15m notation in the derivative function.
+However, in the short time this is running per minute, it does not really seem to do any big harm for the graph. It sometimes goes a bit over, and sometimes a bit under
+the ACTUAL_* graphs. So on average looks the same.
+
+Thijs Kaper, November 1, 2020.
 
 
