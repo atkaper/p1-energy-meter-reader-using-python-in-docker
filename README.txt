@@ -232,7 +232,7 @@ And one for back delivery to the NET:
 SELECT mean("value") FROM "ACTUAL_BACKDELIVERY_KW" WHERE $timeFilter GROUP BY time($__interval) fill(null)
 
 
-For graphing separate values, per tarrif, try the next (if you store measurements every 15 minutes, use this graph query):
+For graphing separate values, per tariff, try the next (if you store measurements every 15 minutes, use this graph query):
 
 SELECT (4*derivative(first("value"), 15m)) FROM "TOTAL_DELIVERY_LOW_KWH" WHERE $timeFilter GROUP BY time($__interval) fill(null)
 
@@ -250,13 +250,13 @@ In a second line, same graph, I added current, and made it use the right hand sc
 
 SELECT mean("value") FROM "CURRENT_L1_A" WHERE $timeFilter GROUP BY time($__interval) fill(null)
 
-To choose righ hand scale, you can click on the line legend line color under the graph, which gives you a popup
+To choose right hand scale, you can click on the line legend line color under the graph, which gives you a popup
 to choose color, and which axis to use. Don't forget to hit save after changing anything.
 
 
 To connect the dots in your graphs, make sure you set type to lines, and the null value handling to "connected" for the graphs which only show dots otherwise.
 
-Note: I just changed from measuring each 15 minutes to every minute. I wil later find out if I can alter the queries to get rid of the 15m notation in the derivative function.
+Note: I just changed from measuring each 15 minutes to every minute. I will later find out if I can alter the queries to get rid of the 15m notation in the derivative function.
 However, in the short time this is running per minute, it does not really seem to do any big harm for the graph. It sometimes goes a bit over, and sometimes a bit under
 the ACTUAL_* graphs. So on average looks the same.
 
